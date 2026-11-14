@@ -31,6 +31,7 @@ auto option(string name, string value) -> bool {
   if(name == "Supersampling") vulkan.supersampleScanout = value.boolean();
   if(name == "Disable Video Interface Processing") vulkan.disableVideoInterfaceProcessing = value.boolean();
   if(name == "Weave Deinterlacing") vulkan.weaveDeinterlacing = value.boolean();
+  if(name == "Synchronous RDP") vulkan.synchronous = value.boolean();
   if(vulkan.internalUpscale == 1) vulkan.supersampleScanout = false;
   vulkan.outputUpscale = vulkan.supersampleScanout ? 1 : vulkan.internalUpscale;
   #endif

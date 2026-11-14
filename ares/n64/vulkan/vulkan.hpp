@@ -21,6 +21,10 @@ struct Vulkan {
   bool enable = true;
   bool disableVideoInterfaceProcessing = false;
   bool weaveDeinterlacing = false;
+  // Waits for the GPU after each batch of commands, so the RDP reads RDRAM
+  // at the emulated time the commands were issued rather than whenever the
+  // host GPU gets to them. Slower, but makes runs reproducible.
+  bool synchronous = false;
   u32  internalUpscale = 1;  //1, 2, 4, 8
   bool supersampleScanout = false;
   u32  outputUpscale = supersampleScanout ? 1 : internalUpscale;

@@ -118,6 +118,9 @@ auto Vulkan::render() -> bool {
     if(queueOffset + length > queueSize) {
       //partial command, keep data around for next processing call
       command.start = command.current = command.end;
+      if(synchronous) {
+        implementation->processor->wait_for_timeline(implementation->processor->signal_timeline());
+      }
       return true;
     }
 
@@ -131,6 +134,10 @@ auto Vulkan::render() -> bool {
     }
 
     queueOffset += length;
+  }
+
+  if(synchronous) {
+    implementation->processor->wait_for_timeline(implementation->processor->signal_timeline());
   }
 
   queueOffset = 0;
