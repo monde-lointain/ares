@@ -92,6 +92,8 @@ struct RSP : Thread, Memory::RCP<RSP> {
         u1  ctxDmaOriginCpu;
         u64 ctxCacheFillPc;
         u64 ctxCacheDirtyPc;
+        u1  ctxLateStore;  //the CPU stored it after the task was exposed
+        u8  changed;  //the dirty bytes whose values RDRAM lacks
       } dmem[512], imem[512];
     } taintMask;
 

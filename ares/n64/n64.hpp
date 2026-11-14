@@ -43,6 +43,11 @@ namespace ares::Nintendo64 {
   auto enumerate() -> std::vector<string>;
   auto load(Node::System& node, string name) -> bool;
   auto option(string name, string value) -> bool;
+  //In Homebrew Mode, how many times the RSP or RDP has read bytes the CPU
+  //stored while the reading task ran or still held in its data cache
+  auto racedReads() -> u64;
+  //Marks a display list queued (see RDRAM::Debugger::queued)
+  auto queued(u32 list) -> void;
 
   enum : u32 { Read, Write };
   enum : u32 { Byte = 1, Half = 2, Word = 4, Dual = 8, DCache = 16, ICache = 32 };

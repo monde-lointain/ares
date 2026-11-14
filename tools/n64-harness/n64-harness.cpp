@@ -32,6 +32,13 @@
 //                                                               -> ok
 //   tracetake PATH      write the collected messages, one a line, and
 //                       start collecting afresh                 -> ok COUNT
+//   races               with --homebrew, how many times the RSP or
+//                       RDP has read bytes the CPU stored while the
+//                       reading task ran or still held in its data
+//                       cache, so far                 -> decimal count
+//   queued ADDR         with --homebrew, mark the display list at ADDR
+//                       queued, after the CPU wrote back its data, so
+//                       stores from then on count as racing it  -> ok
 //   quit                exit
 //
 // Addresses are hexadecimal virtual addresses (e.g. 80025c00). Errors are
@@ -43,7 +50,8 @@
 // others, a DMA reading memory still dirty in the CPU's data cache and one
 // writing memory the cache holds. ares prints such notices, like all its
 // messages, to stdout; the harness sends them to stderr and keeps stdout
-// for the replies alone.
+// for the replies alone. It also counts the reads that raced a CPU store
+// (see "races"), each of which can make the frame depend on timing.
 
 #include <nall/nall.hpp>
 #include <nall/main.hpp>
@@ -61,6 +69,8 @@ using namespace nall;
 namespace ares::Nintendo64 {
   auto load(Node::System& node, string name) -> bool;
   auto option(string name, string value) -> bool;
+  auto racedReads() -> u64;
+  auto queued(u32 list) -> void;
 }
 
 namespace {
@@ -249,6 +259,8 @@ auto Harness::execute(const std::vector<string>& words) -> string {
   if(name == "unbreak" && count == 2) return server.setBreakpoint(words[1].hex(), false), "ok";
   if(name == "watch" && count == 3) return server.setWriteWatchpoint(words[1].hex(), words[2].hex(), true), "ok";
   if(name == "unwatch" && count == 3) return server.setWriteWatchpoint(words[1].hex(), words[2].hex(), false), "ok";
+  if(name == "queued" && count == 2) return ares::Nintendo64::queued(words[1].hex()), "ok";
+  if(name == "races" && count == 1) return string{ares::Nintendo64::racedReads()};
   if(name == "run" && count == 2) return runUntilHalt(words[1].natural());
   if(name == "read" && count == 3) {
     auto bytes = server.hooks.read(words[1].hex(), words[2].hex());

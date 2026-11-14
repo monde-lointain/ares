@@ -161,6 +161,42 @@ struct RDRAM : Memory::RCP<RDRAM> {
     auto writeWord(u32 address, int size, u64 value, RBusDevice device) -> void;
     auto cacheErrorContext(string device) -> string;
 
+    //Late stores: CPU stores that reached RDRAM while the RSP or RDP may
+    //read them, so that what they read depends on timing. A clock counts
+    //events: RSP tasks started (not resumed) and, when a driver marks them,
+    //display lists queued. Each 16-byte line keeps the clock at its last
+    //writeback, eviction or uncached store, with the bytes it changed.
+    //A task's reads are late from the event that started its exposure:
+    //the queueing of its list if marked, else its start.
+    struct LateStore {
+      u64 pc = 0;
+      u32 clock = 0;  //0 means no store
+      u16 bytes = 0;  //a bit per byte of the line
+    };
+    std::vector<LateStore> lateStores;
+    u32 clock = 0;
+    u32 rspSince = 0;  //the exposure of the task the RSP runs
+    u32 graphicsSince = 0;  //that of the last graphics task, which the RDP draws
+    struct QueuedList {
+      u32 address;
+      u32 clock;  //at its queueing
+    };
+    std::vector<QueuedList> queuedLists;  //awaiting their task's start
+    //Coprocessor reads of late stores or of lines dirty in the CPU's cache,
+    //either of which a timing change can alter; unlike notices, every one
+    u64 racedReads = 0;
+    auto stored(u32 address, u16 bytes, u64 pc) -> void;
+    //Which of the BYTES of a cache line's WORDS differ from RDRAM's at
+    //ADDRESS; rewriting a byte with its value races nothing
+    auto changedBytes(u32 address, const u32* words, u16 bytes) -> u16;
+    auto writtenBack(u32 address, const u32* words, u16 dirty, u64 pc) -> void;
+    //Marks a display list queued; call it once the CPU has written back the
+    //data the list uses, as stores before then are not late
+    auto queued(u32 list) -> void;
+    auto rspStarted() -> void;
+    //The late store a read of a line's BYTES sees for a task exposed SINCE
+    auto lateStore(u32 address, u16 bytes, u32 since) -> const LateStore*;
+
     struct Memory {
       Node::Debugger::Memory ram;
       Node::Debugger::Memory dcache;

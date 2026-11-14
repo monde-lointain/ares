@@ -22,6 +22,14 @@ auto load(Node::System& node, string name) -> bool {
   return system.load(node, name);
 }
 
+auto queued(u32 list) -> void {
+  rdram.debugger.queued(list);
+}
+
+auto racedReads() -> u64 {
+  return rdram.debugger.racedReads;
+}
+
 auto option(string name, string value) -> bool {
   #if defined(VULKAN)
   if(name == "Enable GPU acceleration") vulkan.enable = value.boolean();

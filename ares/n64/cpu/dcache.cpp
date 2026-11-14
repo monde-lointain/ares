@@ -15,6 +15,7 @@ auto CPU::DataCache::Line::fill(u32 paddr) -> void {
 auto CPU::DataCache::Line::writeBack() -> void {
   cpu.step(40 * 2);
   const u32 tag = tagKey & ~0x0000'0fffu;
+  if(unlikely(system.homebrewMode)) rdram.debugger.writtenBack(tag | index, words, dirty, dirtyPc);
   dirty = 0;
   cpu.busWriteBurst<DCache>(tag | index, words);
 }

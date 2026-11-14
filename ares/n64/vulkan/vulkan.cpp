@@ -113,7 +113,16 @@ auto Vulkan::checkLoadCoherence(const u32* words, u32 code) const -> void {
     u32 first = max(start, address) - address;
     u32 last = min(end, address + 16) - address;
     u16 loaded = (1 << last) - (1 << first);
+    if(auto store = rdram.debugger.lateStore(address, loaded, rdram.debugger.graphicsSince)) {
+      rdram.debugger.racedReads++;
+      string msg = {"RDP loading a texture from RDRAM address 0x", hex(textureImage.address),
+                    " which the CPU stored to after the graphics task was queued or started\n"};
+      msg.append(string{"\tStored at CPU PC: 0x", hex(store->pc, 16L), "\n"});
+      debug(unusual, msg);
+      return;
+    }
     if(!line.hit(address) || !(line.dirty & loaded)) continue;
+    if(rdram.debugger.changedBytes(address, line.words, line.dirty & loaded)) rdram.debugger.racedReads++;
     //The line's address is left out: notices are told apart by their text,
     //and a texture rewritten a row at a time would repeat one per line.
     string msg = {"RDP loading a texture from RDRAM address 0x", hex(textureImage.address),

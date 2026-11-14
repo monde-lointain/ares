@@ -96,7 +96,77 @@ auto RDRAM::Debugger::readWord(u32 address, int size, RBusDevice device) -> void
   }
 }
 
+auto RDRAM::Debugger::stored(u32 address, u16 bytes, u64 pc) -> void {
+  if(lateStores.empty()) lateStores.resize(rdram.ram.size >> 4);
+  u32 line = address >> 4;
+  if(line >= lateStores.size()) return;
+  auto& store = lateStores[line];
+  if(store.clock != clock) store.bytes = 0;
+  store.clock = clock;
+  store.bytes |= bytes;
+  store.pc = pc;
+}
+
+auto RDRAM::Debugger::changedBytes(u32 address, const u32* words, u16 bytes) -> u16 {
+  u16 changed = 0;
+  for(u32 byte : range(16)) {
+    if(!(bytes >> byte & 1)) continue;
+    u8 cached = words[byte >> 2] >> (24 - (byte & 3) * 8);
+    if(cached != rdram.ram.Nintendo64::Memory::Writable::read<Byte>(address + byte)) changed |= 1 << byte;
+  }
+  return changed;
+}
+
+auto RDRAM::Debugger::writtenBack(u32 address, const u32* words, u16 dirty, u64 pc) -> void {
+  if(u16 changed = changedBytes(address, words, dirty)) stored(address, changed, pc);
+}
+
+auto RDRAM::Debugger::queued(u32 list) -> void {
+  queuedLists.push_back({list & 0x1fff'ffff, ++clock});
+}
+
+//OSTask, which osSpTaskLoad copies to DMEM before the RSP starts, gives the
+//task's type, whether it resumes a yielded one and its display list
+auto RDRAM::Debugger::rspStarted() -> void {
+  static constexpr u32 TaskAddress = 0xfc0;
+  static constexpr u32 DataPointer = 0x30;
+  static constexpr u32 GraphicsTask = 1;
+  static constexpr u32 TaskYielded = 1;
+  u32 type = rsp.dmem.read<Word>(TaskAddress);
+  u32 flags = rsp.dmem.read<Word>(TaskAddress + 4);
+  if(type == GraphicsTask && (flags & TaskYielded)) {
+    rspSince = graphicsSince;
+    return;
+  }
+  rspSince = ++clock;
+  if(type != GraphicsTask) return;
+  u32 address = rsp.dmem.read<Word>(TaskAddress + DataPointer) & 0x1fff'ffff;
+  for(auto list = queuedLists.begin(); list != queuedLists.end(); list++) {
+    if(list->address != address) continue;
+    rspSince = list->clock;
+    queuedLists.erase(list);
+    break;
+  }
+  graphicsSince = rspSince;
+}
+
+auto RDRAM::Debugger::lateStore(u32 address, u16 bytes, u32 since) -> const LateStore* {
+  u32 line = address >> 4;
+  if(line >= lateStores.size()) return nullptr;
+  auto& store = lateStores[line];
+  if(store.clock == 0 || store.clock < since || !(store.bytes & bytes)) return nullptr;
+  return &store;
+}
+
 auto RDRAM::Debugger::writeWord(u32 address, int size, u64 value, RBusDevice device) -> void {
+  if (system.homebrewMode && device == RBusDevice::VR4300_UNCACHED) {
+    u16 changed = 0;
+    for(u32 byte : range(size)) {
+      u8 newByte = value >> ((size - 1 - byte) * 8);
+      if(newByte != rdram.ram.Nintendo64::Memory::Writable::read<Byte>(address + byte)) changed |= 1 << ((address + byte) & 0xF);
+    }
+    if(changed) stored(address & ~15, changed, cpu.ipu.pc);
+  }
   if (system.homebrewMode && (address & ~15) != lastWrittenCacheline) {
     lastWrittenCacheline = address & ~15;
     auto& line = cpu.dcache.line(address);

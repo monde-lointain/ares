@@ -135,8 +135,21 @@ auto RSP::Debugger::dmaReadWord(u32 rdramAddress, u32 pbusRegion, u32 pbusAddres
       taintWord.ctxDmaOriginCpu    = rsp.dma.current.originCpu;
       taintWord.ctxCacheFillPc     = line.fillPc;
       taintWord.ctxCacheDirtyPc    = line.dirtyPc;
+      taintWord.ctxLateStore       = 0;
+      taintWord.changed            = rdram.debugger.changedBytes(rdramAddress & ~15, line.words, line.dirty & dmaMask) >> (rdramAddress & 0x8);
+    } else if(auto store = !rsp.dma.current.originCpu ? rdram.debugger.lateStore(rdramAddress & ~15, dmaMask, rdram.debugger.rspSince) : nullptr) {
+      //A DMA the CPU starts runs while it waits, in its order; only the
+      //RSP's own DMAs run at a time the CPU does not know
+      taintWord.dirty              = (store->bytes & dmaMask) >> (rdramAddress & 0x8);
+      taintWord.ctxDmaRdramAddress = rdramAddress & ~0x7;
+      taintWord.ctxDmaOriginPc     = rsp.dma.current.originPc;
+      taintWord.ctxDmaOriginCpu    = rsp.dma.current.originCpu;
+      taintWord.ctxCacheDirtyPc    = store->pc;
+      taintWord.ctxLateStore       = 1;
+      taintWord.changed            = taintWord.dirty;
     } else {
       taintWord.dirty = 0;
+      taintWord.changed = 0;
     }
   }
 }
@@ -145,7 +158,17 @@ auto RSP::Debugger::dmemReadWord(u12 address, int size, const char *peripheral) 
   if (system.homebrewMode) {
     u8 readMask = ((1 << size) - 1) << (address & 0x7);
     auto& taintWord = taintMask.dmem[address >> 3];
-    if (taintWord.dirty & readMask) {
+    if (taintWord.changed & readMask) rdram.debugger.racedReads++;
+    if (taintWord.dirty & readMask && taintWord.ctxLateStore) {
+      //Addresses are left out: notices are told apart by their text, and
+      //one store loop would repeat a notice for every line it wrote
+      string msg = { peripheral, " reading from DMEM a value the CPU stored to RDRAM after the RSP task was queued or started\n"};
+      msg.append(string{ "\tCurrent RSP PC: 0x", hex(rsp.ipu.pc, 3L), "\n" });
+      msg.append(string{ "\tStored at CPU PC: 0x", hex(taintWord.ctxCacheDirtyPc, 16L), "\n" });
+      debug(unusual, msg);
+      taintWord.dirty = 0;
+      taintWord.changed = 0;
+    } else if (taintWord.dirty & readMask) {
       u32 rdramAddress = taintWord.ctxDmaRdramAddress + (address & 0x7);
       string msg = { peripheral, " reading from DMEM address 0x", hex(address), " which contains a value which is not cache coherent\n"};
       msg.append(string{ "\tCurrent RSP PC: 0x", hex(rsp.ipu.pc, 3L), "\n" });
@@ -160,6 +183,7 @@ auto RSP::Debugger::dmemReadWord(u12 address, int size, const char *peripheral) 
       msg.append(string{ "\tCacheline was loaded at CPU PC: 0x", hex(taintWord.ctxCacheFillPc, 16L), "\n" });
       debug(unusual, msg);
       taintWord.dirty = 0;
+      taintWord.changed = 0;
     }
   }
 }
@@ -182,6 +206,7 @@ auto RSP::Debugger::dmemWriteWord(u12 address, int size, u64 value) -> void {
   if (system.homebrewMode) {
     auto& taintWord = taintMask.dmem[address >> 3];
     taintWord.dirty &= ~(((1 << size) - 1) << (address & 0x7));
+    taintWord.changed &= ~(((1 << size) - 1) << (address & 0x7));
   }
 }
 

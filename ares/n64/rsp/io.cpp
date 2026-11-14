@@ -119,7 +119,10 @@ auto RSP::ioWrite(u32 address, u32 data_, Thread& thread) -> void {
 
   if(address == 4) {
     //SP_STATUS
-    if(data.bit( 0) && !data.bit( 1)) status.halted = 0;
+    if(data.bit( 0) && !data.bit( 1)) {
+      if(unlikely(system.homebrewMode) && status.halted) rdram.debugger.rspStarted();
+      status.halted = 0;
+    }
     if(data.bit( 1) && !data.bit( 0)) status.halted = 1;
     if(data.bit( 2)) status.broken = 0;
     if(data.bit( 3) && !data.bit( 4)) mi.lower(MI::IRQ::SP);
