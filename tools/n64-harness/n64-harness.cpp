@@ -14,6 +14,10 @@
 //                       calls must tell them apart by the program's state.
 //   read ADDR LEN       read memory through the CPU's view      -> hex bytes
 //   write ADDR HEX      write memory through the CPU's view     -> ok
+//   dump PATH ADDR LEN [ADDR LEN]...
+//                       write the ranges' raw bytes to PATH, one
+//                       after another, for snapshots too big for
+//                       hex                                     -> ok BYTES
 //   reg INDEX           read a GDB-numbered register            -> hex
 //   regs                read all 71 GDB registers               -> hex
 //   setreg INDEX HEX    write a GDB-numbered register           -> ok
@@ -78,6 +82,7 @@ private:
   auto writeScreenshot(const string& path) -> bool;
   auto setTrace(const string& component, const string& name, bool enabled) -> bool;
   auto takeTrace(const string& path) -> string;
+  auto dumpMemory(const std::vector<string>& words) -> string;
   auto execute(const std::vector<string>& words) -> string;
 };
 
@@ -206,6 +211,20 @@ auto Harness::takeTrace(const string& path) -> string {
   return {"ok ", count};
 }
 
+auto Harness::dumpMemory(const std::vector<string>& words) -> string {
+  auto& server = nall::GDB::server;
+  file_buffer fp{words[1], file::mode::write};
+  if(!fp) return "error cannot write dump";
+  u64 total = 0;
+  for(u32 index = 2; index < words.size(); index += 2) {
+    auto text = server.hooks.read(words[index].hex(), words[index + 1].hex());
+    if(!text) return "error unreadable address";
+    for(u32 i = 0; i + 1 < text.size(); i += 2) fp.write(text.slice(i, 2).hex());
+    total += text.size() / 2;
+  }
+  return {"ok ", total};
+}
+
 auto Harness::execute(const std::vector<string>& words) -> string {
   auto& server = nall::GDB::server;
   auto count = words.size();
@@ -218,6 +237,7 @@ auto Harness::execute(const std::vector<string>& words) -> string {
     auto bytes = server.hooks.read(words[1].hex(), words[2].hex());
     return bytes ? bytes : string{"error unreadable address"};
   }
+  if(name == "dump" && count >= 4 && count % 2 == 0) return dumpMemory(words);
   if(name == "write" && count == 3) {
     auto& text = words[2];
     if(text.size() % 2) return "error odd hex length";
