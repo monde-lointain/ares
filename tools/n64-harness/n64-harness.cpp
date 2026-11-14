@@ -33,6 +33,14 @@
 //
 // Addresses are hexadecimal virtual addresses (e.g. 80025c00). Errors are
 // reported as "error MESSAGE" so the driver can fail the test loudly.
+//
+// Usage: n64-harness [--sram FILE] [--homebrew] ROM
+//
+// --homebrew turns on ares's Homebrew Mode, whose checks report, among
+// others, a DMA reading memory still dirty in the CPU's data cache and one
+// writing memory the cache holds. ares prints such notices, like all its
+// messages, to stdout; the harness sends them to stderr and keeps stdout
+// for the replies alone.
 
 #include <nall/nall.hpp>
 #include <nall/main.hpp>
@@ -43,6 +51,7 @@ using namespace nall;
 #include <mia/mia.hpp>
 
 #include <iostream>
+#include <unistd.h>
 #include <mutex>
 
 // The core's entry points are not exported through a header.
@@ -67,7 +76,9 @@ struct Harness : ares::Platform {
   u32 lastFrameHeight = 0;
   std::vector<string> traceMessages;
 
-  auto load(const string& romPath, const string& sramPath) -> bool;
+  FILE* replies = stdout;
+
+  auto load(const string& romPath, const string& sramPath, bool homebrew) -> bool;
   auto serve() -> void;
 
   auto attach(ares::Node::Object) -> void override {}
@@ -124,7 +135,7 @@ auto Harness::log(ares::Node::Debugger::Tracer::Tracer, string_view message) -> 
   traceMessages.push_back(message);
 }
 
-auto Harness::load(const string& romPath, const string& sramPath) -> bool {
+auto Harness::load(const string& romPath, const string& sramPath, bool homebrew) -> bool {
   system = mia::System::create("Nintendo 64");
   if(system->load() != successful) return print(stderr, "error: system load failed\n"), false;
   game = mia::Medium::create("Nintendo 64");
@@ -142,6 +153,7 @@ auto Harness::load(const string& romPath, const string& sramPath) -> bool {
   ares::Nintendo64::option("Expansion Pak", true);
   ares::Nintendo64::option("Recompiler", true);
   ares::Nintendo64::option("Synchronous RDP", true);
+  ares::Nintendo64::option("Homebrew Mode", homebrew);
   nall::GDB::server.reset();
   if(!ares::Nintendo64::load(root, "[Nintendo] Nintendo 64 (NTSC)")) return false;
 
@@ -272,7 +284,8 @@ auto Harness::serve() -> void {
     std::erase_if(words, [](const string& word) { return !word; });
     if(words.empty()) continue;
     if(words[0] == "quit") break;
-    std::cout << execute(words).data() << std::endl;
+    fprintf(replies, "%s\n", execute(words).data());
+    fflush(replies);
   }
 }
 
@@ -283,8 +296,9 @@ auto nall::main(Arguments arguments) -> void {
 
   string sramPath;
   arguments.take("--sram", sramPath);
+  bool homebrew = arguments.take("--homebrew");
   if(arguments.size() != 1) {
-    print(stderr, "usage: n64-harness [--sram FILE] ROM\n");
+    print(stderr, "usage: n64-harness [--sram FILE] [--homebrew] ROM\n");
     exit(EXIT_FAILURE);
   }
 
@@ -293,7 +307,14 @@ auto nall::main(Arguments arguments) -> void {
 
   static Harness harness;
   ares::platform = &harness;
-  if(!harness.load(arguments.take(), sramPath)) exit(EXIT_FAILURE);
+  // The replies keep the original stdout; everything else printed there,
+  // such as ares's notices, goes to stderr.
+  harness.replies = fdopen(dup(STDOUT_FILENO), "w");
+  if(!harness.replies || dup2(STDERR_FILENO, STDOUT_FILENO) < 0) {
+    print(stderr, "error: cannot separate the replies from stdout\n");
+    exit(EXIT_FAILURE);
+  }
+  if(!harness.load(arguments.take(), sramPath, homebrew)) exit(EXIT_FAILURE);
   harness.serve();
   harness.root->unload();
 }
