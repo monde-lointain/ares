@@ -6,6 +6,9 @@
 //
 //   break ADDR          stop when the CPU reaches ADDR          -> ok
 //   unbreak ADDR        remove a breakpoint                     -> ok
+//   watch ADDR LEN      stop after the CPU stores to any of the
+//                       LEN bytes from ADDR; DMA does not count -> ok
+//   unwatch ADDR LEN    remove a watchpoint                     -> ok
 //   run MAXFRAMES       run until a breakpoint or MAXFRAMES video
 //                       frames pass  -> "halt PC FRAMES" | "timeout FRAMES"
 //                       An interrupt taken at a breakpoint's instruction
@@ -244,6 +247,8 @@ auto Harness::execute(const std::vector<string>& words) -> string {
 
   if(name == "break" && count == 2) return server.setBreakpoint(words[1].hex(), true), "ok";
   if(name == "unbreak" && count == 2) return server.setBreakpoint(words[1].hex(), false), "ok";
+  if(name == "watch" && count == 3) return server.setWriteWatchpoint(words[1].hex(), words[2].hex(), true), "ok";
+  if(name == "unwatch" && count == 3) return server.setWriteWatchpoint(words[1].hex(), words[2].hex(), false), "ok";
   if(name == "run" && count == 2) return runUntilHalt(words[1].natural());
   if(name == "read" && count == 3) {
     auto bytes = server.hooks.read(words[1].hex(), words[2].hex());

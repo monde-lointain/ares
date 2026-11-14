@@ -560,6 +560,20 @@ namespace nall::GDB {
     }
   }
 
+  auto Server::setWriteWatchpoint(u64 address, u64 length, bool enabled) -> void {
+    u64 addressStart = address;
+    u64 addressEnd = address + length - 1;
+    if(hooks.normalizeAddress) {
+      addressStart = hooks.normalizeAddress(addressStart);
+      addressEnd = hooks.normalizeAddress(addressEnd);
+    }
+    Watchpoint wp{addressStart, addressEnd, address, WatchpointType::WRITE};
+    addOrRemoveEntry(watchpointWrite, wp, enabled);
+    if(enabled && hooks.emuCacheInvalidate) {
+      hooks.emuCacheInvalidate(addressStart);
+    }
+  }
+
   auto Server::resumeLocalClient() -> void {
     stepOverPC = currentPC;
     resumeProgram();

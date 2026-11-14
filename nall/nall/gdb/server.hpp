@@ -111,6 +111,8 @@ class Server : public nall::TCPText::Server {
     // TCP connection. Halts are observed with isHalted() once run() returns.
     auto attachLocalClient() -> void;
     auto setBreakpoint(u64 pc, bool enabled) -> void;
+    // Halts after a CPU store to any of the LENGTH bytes from ADDRESS
+    auto setWriteWatchpoint(u64 address, u64 length, bool enabled) -> void;
     auto currentProgramCounter() const -> u64 { return currentPC; }
     // Resumes execution, stepping over a breakpoint at the halted PC.
     auto resumeLocalClient() -> void;
