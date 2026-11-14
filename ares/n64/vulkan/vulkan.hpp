@@ -14,6 +14,7 @@ struct Vulkan {
   auto unmapScanoutRead() -> void;
   auto endScanout() -> void;
   auto crashed() -> const char*;
+  auto traceCommand(const u32* words, u32 length) -> void;
 
   struct Implementation;
   Implementation* implementation = nullptr;
@@ -28,6 +29,13 @@ struct Vulkan {
   u32  internalUpscale = 1;  //1, 2, 4, 8
   bool supersampleScanout = false;
   u32  outputUpscale = supersampleScanout ? 1 : internalUpscale;
+
+  // The texture image that traced loads read from
+  struct TracedImage {
+    u32 address = 0;
+    u32 size = 0;   // log2 of the texel width in nibbles: 0 = 4 bits
+    u32 width = 0;  // in texels
+  } tracedImage;
 };
 
 extern Vulkan vulkan;

@@ -71,6 +71,41 @@ auto Vulkan::unload() -> void {
   implementation = nullptr;
 }
 
+//Traces a command as hex words. A texture load also gets the CRC-32 of the
+//RDRAM bytes it reads, as they are when the RDP reads them.
+auto Vulkan::traceCommand(const u32* words, u32 length) -> void {
+  string message;
+  for(u32 word : range(length * 2)) {
+    message.append(hex(words[word], 8L), word % 2 ? " " : "");
+  }
+  message.trimRight(" ", 1L);
+
+  auto code = words[0] >> 24 & 63;
+  maybe<u32> bytes;
+  if(code == 0x3d) {  //SetTextureImage
+    tracedImage.address = words[1] & 0xffffff;
+    tracedImage.size = words[0] >> 19 & 3;
+    tracedImage.width = (words[0] & 0x3ff) + 1;
+  }
+  if(code == 0x33) {  //LoadBlock: the texel count is lrs + 1
+    u32 texels = (words[1] >> 12 & 0xfff) + 1;
+    bytes = (texels << tracedImage.size) / 2;
+  }
+  if(code == 0x34 || code == 0x30) {  //LoadTile, LoadTLUT: through (sh, th)
+    u32 sh = (words[1] >> 12 & 0xfff) >> 2;
+    u32 th = (words[1] & 0xfff) >> 2;
+    u32 stride = (tracedImage.width << tracedImage.size) / 2;
+    bytes = th * stride + ((sh + 1) << tracedImage.size) / 2;
+  }
+  if(bytes) {
+    u32 start = tracedImage.address & ~7;
+    u32 count = min(bytes() + 7 & ~7, rdram.ram.size - min(start, rdram.ram.size));
+    Hash::CRC32 crc({rdram.ram.data + start, count});
+    message.append(" #", crc.digest());
+  }
+  rdp.debugger.command(message);
+}
+
 auto Vulkan::render() -> bool {
   if(!implementation) return false;
 
@@ -122,6 +157,10 @@ auto Vulkan::render() -> bool {
         implementation->processor->wait_for_timeline(implementation->processor->signal_timeline());
       }
       return true;
+    }
+
+    if(unlikely(rdp.debugger.tracer.command->enabled())) {
+      traceCommand(buffer + queueOffset * 2, length);
     }
 
     if(code >= 8) {
