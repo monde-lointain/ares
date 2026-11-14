@@ -8,9 +8,17 @@ struct RDRAM : Memory::RCP<RDRAM> {
 
     Writable(RDRAM& self) : self(self) {}
 
+    //Lets queued RDP commands that may use the memory finish first
+    auto waitForRdp(u32 address, u32 length) -> void {
+      #if defined(VULKAN)
+      vulkan.access(address, length);
+      #endif
+    }
+
     template<u32 Size>
     auto read(u32 address, RBusDevice device) -> u64 {
       if (address >= size) return 0;
+      waitForRdp(address, Size);
       if (unlikely(system.homebrewMode)) {
         self.debugger.readWord(address, Size, device);
         self.profile.metrics[(u32)device].reads += Size;
@@ -79,6 +87,7 @@ struct RDRAM : Memory::RCP<RDRAM> {
     template<u32 Size>
     auto write(u32 address, u64 value, RBusDevice device) -> void {
       if (address >= size) return;
+      waitForRdp(address, unlikely(mi.initializeMode()) ? mi.initializeLength() + 1 : Size);
       if (unlikely(system.homebrewMode)) {
         self.debugger.writeWord(address, Size, value, device);
       }
@@ -99,6 +108,7 @@ struct RDRAM : Memory::RCP<RDRAM> {
     template<u32 Size>
     auto writeBurst(u32 address, u32 *value, RBusDevice device) -> void {
       if (address >= size) return;
+      waitForRdp(address, Size);
       if (unlikely(system.homebrewMode)) {
         self.profile.metrics[(u32)device].writes += Size;
       }
@@ -122,6 +132,7 @@ struct RDRAM : Memory::RCP<RDRAM> {
           value[4] = value[5] = value[6] = value[7] = 0;
         return;
       }
+      waitForRdp(address, Size);
       if (unlikely(system.homebrewMode)) {
         self.profile.metrics[(u32)device].reads += Size;
       }

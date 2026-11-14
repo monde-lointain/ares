@@ -48,6 +48,7 @@ auto Vulkan::load(Node::Object) -> bool {
     Util::set_thread_logging_interface(&loggingInterface);
     delete implementation;
     implementation = new Vulkan::Implementation(rdram.ram.data, rdram.ram.size);
+    footprint.clear();
     if(!implementation->processor) {
       delete implementation;
       implementation = nullptr;
@@ -71,6 +72,86 @@ auto Vulkan::unload() -> void {
   implementation = nullptr;
 }
 
+//Follows the commands that set the images the RDP reads and writes.
+auto Vulkan::trackImages(const u32* words, u32 code) -> void {
+  Image image;
+  image.address = words[1] & 0xffffff;
+  image.size = words[0] >> 19 & 3;
+  image.width = (words[0] & 0x3ff) + 1;
+  if(code == 0x3d) textureImage = image;  //SetTextureImage
+  if(code == 0x3f) colorImage = image;    //SetColorImage
+  if(code == 0x3e) depthImage = image;    //SetMaskImage: only the address counts
+  if(code == 0x2d) scissorRows = (words[1] & 0xfff) / 4 + 1;  //SetScissor: yl is 10.2
+}
+
+//The number of bytes from the texture image that a texture load reads.
+auto Vulkan::loadBytes(const u32* words, u32 code) const -> maybe<u32> {
+  if(code == 0x33) {  //LoadBlock: the texel count is lrs + 1
+    u32 texels = (words[1] >> 12 & 0xfff) + 1;
+    return (texels << textureImage.size) / 2;
+  }
+  if(code == 0x34 || code == 0x30) {  //LoadTile, LoadTLUT: through (sh, th)
+    u32 sh = (words[1] >> 12 & 0xfff) >> 2;
+    u32 th = (words[1] & 0xfff) >> 2;
+    u32 stride = (textureImage.width << textureImage.size) / 2;
+    return th * stride + ((sh + 1) << textureImage.size) / 2;
+  }
+  return nothing;
+}
+
+//Marks the RDRAM a command may read or write once it reaches the GPU.
+auto Vulkan::markFootprint(const u32* words, u32 code) -> void {
+  if(auto bytes = loadBytes(words, code)) {
+    //One more doubleword covers the alignment the load rounds down to
+    footprint.mark(textureImage.address & ~7, bytes() + 8);
+  }
+  if(code == 0x2d || code == 0x3e || code == 0x3f) footprint.imagesMarked = false;
+
+  //Triangles and rectangles draw; draws stay inside the scissor box
+  bool draws = (code >= 0x08 && code <= 0x0f) || code == 0x24 || code == 0x25 || code == 0x36;
+  if(draws && !footprint.imagesMarked) {
+    //A 4-bit color image is invalid; count it as 8-bit to stay a superset
+    u32 rowBytes = (colorImage.width << max(colorImage.size, 1u)) / 2;
+    footprint.mark(colorImage.address, rowBytes * scissorRows);
+    footprint.mark(depthImage.address, colorImage.width * 2 * scissorRows);
+    footprint.imagesMarked = true;
+  }
+}
+
+//Lets the GPU finish every command sent to it, so RDRAM holds their results.
+auto Vulkan::waitForQueuedCommands() -> void {
+  implementation->processor->wait_for_timeline(implementation->processor->signal_timeline());
+  footprint.clear();
+}
+
+auto Vulkan::Footprint::touches(u32 address, u32 length) const -> bool {
+  u32 first = address >> BlockShift;
+  u32 last = (address + length - 1) >> BlockShift;
+  if(first > high || last < low) return false;
+  for(u32 block = first; block <= last && block < Blocks; block++) {
+    if(blocks[block]) return true;
+  }
+  return false;
+}
+
+auto Vulkan::Footprint::mark(u32 address, u32 length) -> void {
+  if(length == 0 || address >= Blocks << BlockShift) return;
+  u32 first = address >> BlockShift;
+  u32 last = min((address + length - 1) >> BlockShift, Blocks - 1);
+  memory::fill<u8>(blocks + first, last - first + 1, 1);
+  low = min(low, first);
+  high = max(high, last);
+  pending = true;
+}
+
+auto Vulkan::Footprint::clear() -> void {
+  if(pending) memory::fill<u8>(blocks + low, high - low + 1, 0);
+  pending = false;
+  imagesMarked = false;
+  low = Blocks;
+  high = 0;
+}
+
 //Traces a command as hex words. A texture load also gets the CRC-32 of the
 //RDRAM bytes it reads, as they are when the RDP reads them.
 auto Vulkan::traceCommand(const u32* words, u32 length) -> void {
@@ -80,25 +161,8 @@ auto Vulkan::traceCommand(const u32* words, u32 length) -> void {
   }
   message.trimRight(" ", 1L);
 
-  auto code = words[0] >> 24 & 63;
-  maybe<u32> bytes;
-  if(code == 0x3d) {  //SetTextureImage
-    tracedImage.address = words[1] & 0xffffff;
-    tracedImage.size = words[0] >> 19 & 3;
-    tracedImage.width = (words[0] & 0x3ff) + 1;
-  }
-  if(code == 0x33) {  //LoadBlock: the texel count is lrs + 1
-    u32 texels = (words[1] >> 12 & 0xfff) + 1;
-    bytes = (texels << tracedImage.size) / 2;
-  }
-  if(code == 0x34 || code == 0x30) {  //LoadTile, LoadTLUT: through (sh, th)
-    u32 sh = (words[1] >> 12 & 0xfff) >> 2;
-    u32 th = (words[1] & 0xfff) >> 2;
-    u32 stride = (tracedImage.width << tracedImage.size) / 2;
-    bytes = th * stride + ((sh + 1) << tracedImage.size) / 2;
-  }
-  if(bytes) {
-    u32 start = tracedImage.address & ~7;
+  if(auto bytes = loadBytes(words, words[0] >> 24 & 63)) {
+    u32 start = textureImage.address & ~7;
     u32 count = min(bytes() + 7 & ~7, rdram.ram.size - min(start, rdram.ram.size));
     Hash::CRC32 crc({rdram.ram.data + start, count});
     message.append(" #", crc.digest());
@@ -153,14 +217,14 @@ auto Vulkan::render() -> bool {
     if(queueOffset + length > queueSize) {
       //partial command, keep data around for next processing call
       command.start = command.current = command.end;
-      if(synchronous) {
-        implementation->processor->wait_for_timeline(implementation->processor->signal_timeline());
-      }
       return true;
     }
 
+    const u32* words = buffer + queueOffset * 2;
+    trackImages(words, code);
+    if(synchronous) markFootprint(words, code);
     if(unlikely(rdp.debugger.tracer.command->enabled())) {
-      traceCommand(buffer + queueOffset * 2, length);
+      traceCommand(words, length);
     }
 
     if(code >= 8) {
@@ -168,15 +232,11 @@ auto Vulkan::render() -> bool {
     }
 
     if(::RDP::Op(code) == ::RDP::Op::SyncFull) {
-      implementation->processor->wait_for_timeline(implementation->processor->signal_timeline());
+      waitForQueuedCommands();
       rdp.syncFull();
     }
 
     queueOffset += length;
-  }
-
-  if(synchronous) {
-    implementation->processor->wait_for_timeline(implementation->processor->signal_timeline());
   }
 
   queueOffset = 0;
