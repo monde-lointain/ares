@@ -107,6 +107,14 @@ class Server : public nall::TCPText::Server {
     auto updateLoop() -> void;
     auto getStatusText(u32 port, bool useIPv4) -> string;
 
+    // In-process client: lets a headless harness use breakpoints without a
+    // TCP connection. Halts are observed with isHalted() once run() returns.
+    auto attachLocalClient() -> void;
+    auto setBreakpoint(u64 pc, bool enabled) -> void;
+    auto currentProgramCounter() const -> u64 { return currentPC; }
+    // Resumes execution, stepping over a breakpoint at the halted PC.
+    auto resumeLocalClient() -> void;
+
   protected:
     auto onText(string_view text) -> void override;
     auto onConnect() -> void override;
@@ -126,6 +134,8 @@ class Server : public nall::TCPText::Server {
     bool requestDisconnect{false}; // set to true if the client decides it wants to disconnect
 
     bool hasActiveClient{false};
+    bool localClient{false}; // client lives in-process, so signals are not sent
+    maybe<u64> stepOverPC{}; // breakpoint to ignore once after a local resume
     u32 messageCount{0}; // message count per update loop
     s32 currentThreadC{-1}; // selected thread for the next 'c' command
 

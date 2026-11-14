@@ -34,6 +34,7 @@ namespace nall::GDB {
 
   auto Server::reportSignal(Signal sig, u64 originPC) -> bool {
     if(!hasActiveClient || !handshakeDone)return true; // no client -> no error
+    if(localClient)return true; // local harnesses detect faults by other means
     if(forceHalt)return false; // Signals can only happen while the game is running, ignore others
 
     pcOverride = originPC;
@@ -86,14 +87,17 @@ namespace nall::GDB {
     if(!hasActiveClient)return true;
 
     currentPC = pc;
-    bool needHalts = forceHalt || std::ranges::find(breakpoints, pc) != breakpoints.end();
+    bool steppingOver = stepOverPC && *stepOverPC == pc;
+    stepOverPC.reset();
+    bool atBreakpoint = !steppingOver && std::ranges::find(breakpoints, pc) != breakpoints.end();
+    bool needHalts = forceHalt || atBreakpoint;
 
     if(needHalts) {
       forceHalt = true; // breakpoints may get deleted after a signal, but we have to stay stopped
 
       if(!haltSignalSent) {
         haltSignalSent = true;
-        sendSignal(Signal::TRAP);
+        if(!localClient) sendSignal(Signal::TRAP);
       }
     }
 
@@ -542,6 +546,25 @@ namespace nall::GDB {
     resetClientData();
   }
 
+  auto Server::attachLocalClient() -> void {
+    resetClientData();
+    hasActiveClient = true;
+    handshakeDone = true;
+    localClient = true;
+  }
+
+  auto Server::setBreakpoint(u64 pc, bool enabled) -> void {
+    addOrRemoveEntry(breakpoints, pc, enabled);
+    if(enabled && hooks.emuCacheInvalidate) {
+      hooks.emuCacheInvalidate(pc);
+    }
+  }
+
+  auto Server::resumeLocalClient() -> void {
+    stepOverPC = currentPC;
+    resumeProgram();
+  }
+
   auto Server::resetClientData() -> void {
     breakpoints.clear();
     breakpoints.reserve(DEF_BREAKPOINT_SIZE);
@@ -563,6 +586,8 @@ namespace nall::GDB {
 
     currentThreadC = -1;
     hasActiveClient = false;
+    localClient = false;
+    stepOverPC.reset();
     handshakeDone = false;
     requestDisconnect = false;
   }
