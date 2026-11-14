@@ -64,6 +64,7 @@ struct Vulkan {
   auto trackImages(const u32* words, u32 code) -> void;
   auto loadBytes(const u32* words, u32 code) const -> maybe<u32>;
   auto markFootprint(const u32* words, u32 code) -> void;
+  auto checkLoadCoherence(const u32* words, u32 code) const -> void;
   auto waitForQueuedCommands() -> void;
 
   // Called before every emulated RDRAM access

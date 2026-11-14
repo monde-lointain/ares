@@ -99,6 +99,32 @@ auto Vulkan::loadBytes(const u32* words, u32 code) const -> maybe<u32> {
   return nothing;
 }
 
+//In homebrew mode, reports a texture load that reads RDRAM the CPU has newer
+//bytes for in a dirty data cache line. The RDP then sees the old bytes, or the
+//new ones if the line is evicted first, so the image depends on timing.
+auto Vulkan::checkLoadCoherence(const u32* words, u32 code) const -> void {
+  auto bytes = loadBytes(words, code);
+  if(!bytes) return;
+  u32 start = textureImage.address & ~7;  //loads round the address down
+  u32 end = min(start + bytes(), rdram.ram.size);
+  for(u32 address = start & ~15; address < end; address += 16) {
+    auto& line = cpu.dcache.line(address | 0x8000'0000);
+    //The line's dirty mask has a bit per byte; only the loaded ones count
+    u32 first = max(start, address) - address;
+    u32 last = min(end, address + 16) - address;
+    u16 loaded = (1 << last) - (1 << first);
+    if(!line.hit(address) || !(line.dirty & loaded)) continue;
+    //The line's address is left out: notices are told apart by their text,
+    //and a texture rewritten a row at a time would repeat one per line.
+    string msg = {"RDP loading a texture from RDRAM address 0x", hex(textureImage.address),
+                  " which is modified in the cache (missing cache writeback?)\n"};
+    msg.append(string{"\tCacheline was loaded at CPU PC: 0x", hex(line.fillPc, 16L), "\n"});
+    msg.append(string{"\tCacheline was last written at CPU PC: 0x", hex(line.dirtyPc, 16L), "\n"});
+    debug(unusual, msg);
+    return;  //one notice per load is enough to find the writer
+  }
+}
+
 //Marks the RDRAM a command may read or write once it reaches the GPU.
 auto Vulkan::markFootprint(const u32* words, u32 code) -> void {
   if(auto bytes = loadBytes(words, code)) {
@@ -223,6 +249,7 @@ auto Vulkan::render() -> bool {
     const u32* words = buffer + queueOffset * 2;
     trackImages(words, code);
     if(synchronous) markFootprint(words, code);
+    if(unlikely(system.homebrewMode)) checkLoadCoherence(words, code);
     if(unlikely(rdp.debugger.tracer.command->enabled())) {
       traceCommand(words, length);
     }
