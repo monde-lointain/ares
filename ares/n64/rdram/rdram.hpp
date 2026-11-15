@@ -194,6 +194,9 @@ struct RDRAM : Memory::RCP<RDRAM> {
     //data the list uses, as stores before then are not late
     auto queued(u32 list) -> void;
     auto rspStarted() -> void;
+    //Notes the RSP signaling that its task yielded
+    auto rspYielded() -> void;
+    bool graphicsYielded = false;  //the last graphics task yielded
     //The late store a read of a line's BYTES sees for a task exposed SINCE
     auto lateStore(u32 address, u16 bytes, u32 since) -> const LateStore*;
 

@@ -134,7 +134,11 @@ auto RDRAM::Debugger::rspStarted() -> void {
   static constexpr u32 TaskYielded = 1;
   u32 type = rsp.dmem.read<Word>(TaskAddress);
   u32 flags = rsp.dmem.read<Word>(TaskAddress + 4);
-  if(type == GraphicsTask && (flags & TaskYielded)) {
+  //A task that yields before osSpTaskYielded sees SP_STATUS_YIELD starts
+  //again without OS_TASK_YIELDED, but as the same task
+  bool resumed = type == GraphicsTask && graphicsYielded;
+  if(type == GraphicsTask) graphicsYielded = false;
+  if(type == GraphicsTask && ((flags & TaskYielded) || resumed)) {
     rspSince = graphicsSince;
     return;
   }
@@ -148,6 +152,10 @@ auto RDRAM::Debugger::rspStarted() -> void {
     break;
   }
   graphicsSince = rspSince;
+}
+
+auto RDRAM::Debugger::rspYielded() -> void {
+  graphicsYielded = rspSince == graphicsSince;
 }
 
 auto RDRAM::Debugger::lateStore(u32 address, u16 bytes, u32 since) -> const LateStore* {

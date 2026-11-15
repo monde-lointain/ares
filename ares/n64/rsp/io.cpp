@@ -135,6 +135,10 @@ auto RSP::ioWrite(u32 address, u32 data_, Thread& thread) -> void {
     if(data.bit(10) && !data.bit( 9)) status.signal[0] = 1;
     if(data.bit(11) && !data.bit(12)) status.signal[1] = 0;
     if(data.bit(12) && !data.bit(11)) status.signal[1] = 1;
+    //libultra's SP_STATUS_YIELDED; the task will start again
+    if(unlikely(system.homebrewMode) && &thread == this && data.bit(12) && !data.bit(11)) {
+      rdram.debugger.rspYielded();
+    }
     if(data.bit(13) && !data.bit(14)) status.signal[2] = 0;
     if(data.bit(14) && !data.bit(13)) status.signal[2] = 1;
     if(data.bit(15) && !data.bit(16)) status.signal[3] = 0;
