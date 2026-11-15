@@ -150,8 +150,11 @@ auto CPU::instruction() -> bool {
     auto block = recompiler.block(ipu.pc, access.paddr);
     if(block) {
       if(Thread::clock >= jitClockTarget) {
-        s64 timerDelta = (s64)scc.compare - (s64)scc.count;
-        if(timerDelta < 0) timerDelta = 0;
+        //Count and Compare wrap at 33 bits, so while Count is past Compare,
+        //the timer can next fire only after Count wraps.
+        s64 timerDelta = scc.count < scc.compare
+          ? (s64)scc.compare - (s64)scc.count
+          : (s64)(1ull << 33) - (s64)scc.count;
         s64 queueDelta = queue.timeToNextEvent();
         if(queueDelta < 0) queueDelta = 0;
         s64 capBudget = min<s64>(Accuracy::CPU::JitInterleaving, min(timerDelta, queueDelta));
