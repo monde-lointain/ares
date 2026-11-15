@@ -39,6 +39,10 @@
 //   queued ADDR         with --homebrew, mark the display list at ADDR
 //                       queued, after the CPU wrote back its data, so
 //                       stores from then on count as racing it  -> ok
+//   graphicsdelay US    with --homebrew, hold each graphics task US
+//                       microseconds before it runs, as an RDP that
+//                       falls behind would, so that stores racing it
+//                       come before its reads and count   -> ok
 //   quit                exit
 //
 // Addresses are hexadecimal virtual addresses (e.g. 80025c00). Errors are
@@ -71,6 +75,7 @@ namespace ares::Nintendo64 {
   auto option(string name, string value) -> bool;
   auto racedReads() -> u64;
   auto queued(u32 list) -> void;
+  auto delayGraphicsTasks(u32 microseconds) -> void;
 }
 
 namespace {
@@ -260,6 +265,7 @@ auto Harness::execute(const std::vector<string>& words) -> string {
   if(name == "watch" && count == 3) return server.setWriteWatchpoint(words[1].hex(), words[2].hex(), true), "ok";
   if(name == "unwatch" && count == 3) return server.setWriteWatchpoint(words[1].hex(), words[2].hex(), false), "ok";
   if(name == "queued" && count == 2) return ares::Nintendo64::queued(words[1].hex()), "ok";
+  if(name == "graphicsdelay" && count == 2) return ares::Nintendo64::delayGraphicsTasks(words[1].natural()), "ok";
   if(name == "races" && count == 1) return string{ares::Nintendo64::racedReads()};
   if(name == "run" && count == 2) return runUntilHalt(words[1].natural());
   if(name == "read" && count == 3) {

@@ -301,6 +301,14 @@ struct RSP : Thread, Memory::RCP<RSP> {
     s64 clock;
   } dma;
 
+  //In Homebrew Mode, how long each graphics task waits before it runs, and
+  //how much of the running task's wait is left, in clocks. Holding the tasks
+  //back plays the RDP falling behind as the hardware's can, which ares does
+  //not time, so that stores racing a queued frame's reads come before them
+  //and are caught.
+  u64 graphicsDelayClocks = 0;
+  u64 delayClocksLeft = 0;
+
   struct Status : Memory::RCP<Status> {
     RSP& self;
     Status(RSP& self) : self(self) {}

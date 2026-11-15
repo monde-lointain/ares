@@ -193,7 +193,9 @@ struct RDRAM : Memory::RCP<RDRAM> {
     //Marks a display list queued; call it once the CPU has written back the
     //data the list uses, as stores before then are not late
     auto queued(u32 list) -> void;
-    auto rspStarted() -> void;
+    //Notes a task's start, and whether it is a graphics task that does not
+    //resume a yielded one
+    auto rspStarted() -> bool;
     //Notes the RSP signaling that its task yielded
     auto rspYielded() -> void;
     bool graphicsYielded = false;  //the last graphics task yielded

@@ -36,6 +36,10 @@ auto RSP::main() -> void {
 
     if(status.halted) {
       step(128);
+    } else if(delayClocksLeft) {
+      u32 clocks = min(delayClocksLeft, (u64)128);
+      step(clocks);
+      delayClocksLeft -= clocks;
     } else {
       instruction();
     }

@@ -127,7 +127,7 @@ auto RDRAM::Debugger::queued(u32 list) -> void {
 
 //OSTask, which osSpTaskLoad copies to DMEM before the RSP starts, gives the
 //task's type, whether it resumes a yielded one and its display list
-auto RDRAM::Debugger::rspStarted() -> void {
+auto RDRAM::Debugger::rspStarted() -> bool {
   static constexpr u32 TaskAddress = 0xfc0;
   static constexpr u32 DataPointer = 0x30;
   static constexpr u32 GraphicsTask = 1;
@@ -140,10 +140,10 @@ auto RDRAM::Debugger::rspStarted() -> void {
   if(type == GraphicsTask) graphicsYielded = false;
   if(type == GraphicsTask && ((flags & TaskYielded) || resumed)) {
     rspSince = graphicsSince;
-    return;
+    return false;
   }
   rspSince = ++clock;
-  if(type != GraphicsTask) return;
+  if(type != GraphicsTask) return false;
   u32 address = rsp.dmem.read<Word>(TaskAddress + DataPointer) & 0x1fff'ffff;
   for(auto list = queuedLists.begin(); list != queuedLists.end(); list++) {
     if(list->address != address) continue;
@@ -152,6 +152,7 @@ auto RDRAM::Debugger::rspStarted() -> void {
     break;
   }
   graphicsSince = rspSince;
+  return true;
 }
 
 auto RDRAM::Debugger::rspYielded() -> void {

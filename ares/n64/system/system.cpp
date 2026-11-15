@@ -26,6 +26,10 @@ auto queued(u32 list) -> void {
   rdram.debugger.queued(list);
 }
 
+auto delayGraphicsTasks(u32 microseconds) -> void {
+  rsp.graphicsDelayClocks = (u64)microseconds * system.frequency() / 1'000'000;
+}
+
 auto racedReads() -> u64 {
   return rdram.debugger.racedReads;
 }
