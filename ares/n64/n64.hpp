@@ -50,6 +50,9 @@ namespace ares::Nintendo64 {
   auto queued(u32 list) -> void;
   //In Homebrew Mode, holds each graphics task back MICROSECONDS before it runs
   auto delayGraphicsTasks(u32 microseconds) -> void;
+  //Scans out and sends each field to the screen, or skips both, which
+  //leaves the emulated machine as it is
+  auto outputVideo(bool enabled) -> void;
 
   enum : u32 { Read, Write };
   enum : u32 { Byte = 1, Half = 2, Word = 4, Dual = 8, DCache = 16, ICache = 32 };

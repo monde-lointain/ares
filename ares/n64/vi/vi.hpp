@@ -72,6 +72,8 @@ struct VI : Thread, Memory::RCP<VI> {
 
 //unserialized:
   bool refreshed;
+  //whether each field is scanned out and sent to the screen
+  bool outputsVideo = true;
 
   #if defined(VULKAN)
   bool gpuOutputValid = false;

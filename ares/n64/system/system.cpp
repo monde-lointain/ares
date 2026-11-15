@@ -30,6 +30,10 @@ auto delayGraphicsTasks(u32 microseconds) -> void {
   rsp.graphicsDelayClocks = (u64)microseconds * system.frequency() / 1'000'000;
 }
 
+auto outputVideo(bool enabled) -> void {
+  vi.outputsVideo = enabled;
+}
+
 auto racedReads() -> u64 {
   return rdram.debugger.racedReads;
 }

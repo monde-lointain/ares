@@ -27,6 +27,11 @@
 //   input PORT NAME V   set a gamepad input (button 0/1, axis
 //                       -32768..32767); PORT counts from 1      -> ok
 //   screenshot PATH     write the last video frame as a PPM     -> ok
+//   video on|off        scan out and convert each video frame, as
+//                       at start, or skip it; neither changes the
+//                       machine, and without video, runs take
+//                       about a tenth less CPU time, but
+//                       screenshots go stale                    -> ok
 //   trace COMPONENT NAME on|off
 //                       collect a tracer's messages, e.g. "RDP Command"
 //                                                               -> ok
@@ -76,6 +81,7 @@ namespace ares::Nintendo64 {
   auto racedReads() -> u64;
   auto queued(u32 list) -> void;
   auto delayGraphicsTasks(u32 microseconds) -> void;
+  auto outputVideo(bool enabled) -> void;
 }
 
 namespace {
@@ -294,6 +300,9 @@ auto Harness::execute(const std::vector<string>& words) -> string {
     return setTrace(words[1], words[2], words[3] == "on") ? "ok" : "error no such tracer";
   }
   if(name == "tracetake" && count == 2) return takeTrace(words[1]);
+  if(name == "video" && count == 2 && (words[1] == "on" || words[1] == "off")) {
+    return ares::Nintendo64::outputVideo(words[1] == "on"), "ok";
+  }
   if(name == "screenshot" && count == 2) {
     return writeScreenshot(words[1]) ? "ok" : "error cannot write screenshot";
   }

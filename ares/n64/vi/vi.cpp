@@ -85,12 +85,12 @@ auto VI::main() -> void {
         if(++io.leapCounter == 5) io.leapCounter = 0;
         #if defined(VULKAN)
         if (vulkan.enable) {
-          gpuOutputValid = vulkan.scanoutAsync(io.field);
+          if(outputsVideo) gpuOutputValid = vulkan.scanoutAsync(io.field);
           vulkan.frame();
         }
         #endif
         refreshed = true;
-        screen->frame();
+        if(outputsVideo) screen->frame();
       }
 
       if(io.halfLinesPerField.bit(0)) { // progressive
