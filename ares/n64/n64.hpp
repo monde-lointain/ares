@@ -53,6 +53,10 @@ namespace ares::Nintendo64 {
   //Scans out and sends each field to the screen, or skips both, which
   //leaves the emulated machine as it is
   auto outputVideo(bool enabled) -> void;
+  //Copies SIZE bytes of RDRAM from the KSEG0 or KSEG1 ADDRESS to TARGET,
+  //in the guest's byte order, as the debugger reads them through the CPU,
+  //so through its data cache for KSEG0; false if they aren't all RDRAM
+  auto readRdram(u32 address, u32 size, u8* target) -> bool;
 
   enum : u32 { Read, Write };
   enum : u32 { Byte = 1, Half = 2, Word = 4, Dual = 8, DCache = 16, ICache = 32 };

@@ -86,6 +86,7 @@ namespace ares::Nintendo64 {
   auto queued(u32 list) -> void;
   auto delayGraphicsTasks(u32 microseconds) -> void;
   auto outputVideo(bool enabled) -> void;
+  auto readRdram(u32 address, u32 size, u8* target) -> bool;
 }
 
 namespace {
@@ -122,6 +123,7 @@ private:
   auto setTrace(const string& component, const string& name, bool enabled) -> bool;
   auto takeTrace(const string& path) -> string;
   auto dumpMemory(const std::vector<string>& words) -> string;
+  std::vector<u8> dumpBuffer;  //kept, so its pages are found again
   auto execute(const std::vector<string>& words) -> string;
 };
 
@@ -254,16 +256,31 @@ auto Harness::takeTrace(const string& path) -> string {
 
 auto Harness::dumpMemory(const std::vector<string>& words) -> string {
   auto& server = nall::GDB::server;
-  file_buffer fp{words[1], file::mode::write};
-  if(!fp) return "error cannot write dump";
-  u64 total = 0;
+  auto& bytes = dumpBuffer;
+  bytes.clear();
   for(u32 index = 2; index < words.size(); index += 2) {
-    auto text = server.hooks.read(words[index].hex(), words[index + 1].hex());
-    if(!text) return "error unreadable address";
-    for(u32 i = 0; i + 1 < text.size(); i += 2) fp.write(text.slice(i, 2).hex());
-    total += text.size() / 2;
+    u64 address = words[index].hex();
+    u32 length = words[index + 1].hex();
+    u64 offset = bytes.size();
+    bytes.resize(offset + length);
+    // RDRAM, the common case, is copied at once; the rest is read as the
+    // debugger reads it, through hex.
+    if(!ares::Nintendo64::readRdram(address, length, bytes.data() + offset)) {
+      auto text = server.hooks.read(address, length);
+      if(!text) return "error unreadable address";
+      for(u32 i = 0; i + 1 < text.size(); i += 2) bytes[offset + i / 2] = text.slice(i, 2).hex();
+    }
   }
-  return {"ok ", total};
+  // One write, as nall's file_buffer writes a byte at a time, over the
+  // file's old contents where it has some, as the pages of a file in
+  // memory, such as in /dev/shm, are then not freed and found again.
+  FILE* fp = fopen(words[1], "r+b");
+  if(!fp) fp = fopen(words[1], "wb");
+  if(!fp) return "error cannot write dump";
+  bool isWritten = fwrite(bytes.data(), 1, bytes.size(), fp) == bytes.size()
+    && fflush(fp) == 0 && ftruncate(fileno(fp), bytes.size()) == 0;
+  if(fclose(fp) != 0 || !isWritten) return "error cannot write dump";
+  return {"ok ", bytes.size()};
 }
 
 auto Harness::execute(const std::vector<string>& words) -> string {

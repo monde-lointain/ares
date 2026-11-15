@@ -34,6 +34,44 @@ auto outputVideo(bool enabled) -> void {
   vi.outputsVideo = enabled;
 }
 
+auto readRdram(u32 address, u32 size, u8* target) -> bool {
+  u32 segment = address >> 29;
+  if(segment != 4 && segment != 5) return false;
+  u32 start = address & 0x1fff'ffff;
+  if((u64)start + size > rdram.ram.size) return false;
+  rdram.ram.waitForRdp(start, size);
+
+  //RDRAM keeps each word in the host's byte order.
+  const u8* data = rdram.ram.data;
+  u32 offset = 0;
+  for(; offset < size && (start + offset) & 3; offset++) {
+    target[offset] = data[(start + offset) ^ 3];
+  }
+  for(; size - offset >= 4; offset += 4) {
+    u32 word;
+    memcpy(&word, data + start + offset, sizeof(word));
+    word = __builtin_bswap32(word);
+    memcpy(target + offset, &word, sizeof(word));
+  }
+  for(; offset < size; offset++) {
+    target[offset] = data[(start + offset) ^ 3];
+  }
+  if(segment == 5) return true;
+
+  //A valid data cache line is what the CPU reads at its addresses, which
+  //it makes as fill does.
+  for(auto& line : cpu.dcache.lines) {
+    if(!line.valid()) continue;
+    u32 lineStart = (line.tagKey & ~0xfffu) | line.index;
+    for(u32 byte : range(16)) {
+      u32 physical = lineStart + byte;
+      if(physical < start || physical - start >= size) continue;
+      target[physical - start] = line.bytes[byte ^ 3];
+    }
+  }
+  return true;
+}
+
 auto racedReads() -> u64 {
   return rdram.debugger.racedReads;
 }
