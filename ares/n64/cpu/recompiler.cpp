@@ -330,7 +330,7 @@ auto CPU::Recompiler::block(u64 vaddr, u32 address) -> Block* {
       section->lineBlocks[line] = 1;
     }
     block->sectionDirty = sectionDirty.data() + sectionIndex(block->startAddress);
-    auto registerAlias = [&](u32 aliasAddress) -> Block* {
+    auto registerAlias = [&](u32 aliasAddress, bool isPure) -> Block* {
       if(aliasAddress == block->startAddress) return block;
       auto aliasIndex = blockIndex(aliasAddress);
       for(auto alias = section->blocks[aliasIndex]; alias; alias = alias->next) {
@@ -347,12 +347,13 @@ auto CPU::Recompiler::block(u64 vaddr, u32 address) -> Block* {
       alias->startAddress = aliasAddress;
       alias->endAddress = block->endAddress;
       alias->sectionDirty = block->sectionDirty;
+      alias->isPure = isPure;
       section->blocks[aliasIndex] = alias;
       section->lineBlocks[sectionLineIndex(aliasAddress)] = 1;
       return alias;
     };
-    for(auto aliasAddress : emitAliasAddresses) {
-      registerAlias(aliasAddress);
+    for(size_t index = 0; index < emitAliasAddresses.size(); index++) {
+      registerAlias(emitAliasAddresses[index], emitAliasPurity[index]);
     }
     memory::jitprotect(true);
   }
@@ -445,6 +446,76 @@ auto computeBranchTargets(bool coprocessor1Enabled, u64 branchVaddr, u32 instruc
 auto endsBlockAfterDelaySlot(ares::Nintendo64::CPU::OpInfo info) -> bool {
   if(!info.unconditionalJump()) return false;
   if(info.unconditionalJumpAndLink()) return false;
+  return true;
+}
+
+// Whether an instruction only computes in the GPRs, LO and HI, branches or
+// reads memory: one that can't trap, store, or touch a coprocessor, the
+// cache or the LL bit. A read that is uncached or faults is counted as a
+// side effect when it runs (see CPU::sideEffectCount).
+auto isPureInstruction(u32 instruction) -> bool {
+  u32 opcode = instruction >> 26;
+  u32 rt = instruction >> 16 & 31;
+  u32 function = instruction & 63;
+  switch(opcode) {
+  case 0x00:  //SPECIAL: shifts, JR, JALR, LO and HI, multiplies, divides
+              //and the arithmetic that can't overflow
+    return function <= 0x09 && function != 0x01 && function != 0x05
+        || function >= 0x10 && function <= 0x1f
+        || function == 0x21 || function == 0x23
+        || function >= 0x24 && function <= 0x27
+        || function == 0x2a || function == 0x2b;
+  case 0x01:  //REGIMM: the branches, but not the traps
+    return rt <= 0x03 || rt >= 0x10 && rt <= 0x13;
+  case 0x02: case 0x03:                       //J, JAL
+  case 0x04: case 0x05: case 0x06: case 0x07: //BEQ, BNE, BLEZ, BGTZ
+  case 0x09: case 0x0a: case 0x0b:            //ADDIU, SLTI, SLTIU
+  case 0x0c: case 0x0d: case 0x0e: case 0x0f: //ANDI, ORI, XORI, LUI
+  case 0x14: case 0x15: case 0x16: case 0x17: //BEQL, BNEL, BLEZL, BGTZL
+  case 0x20: case 0x21: case 0x22: case 0x23: //LB, LH, LWL, LW
+  case 0x24: case 0x25: case 0x26: case 0x27: //LBU, LHU, LWR, LWU
+    return true;
+  }
+  return false;
+}
+
+// Whether every instruction that a run entering PLAN at ENTRY can reach
+// before it returns to the dispatcher is pure. A run leaves at each branch
+// edge that isn't one of the plan's internal entries, and at the window's
+// end; following an edge it may not take only makes the answer cautious.
+auto isPureFrom(const EmitPlan& plan, u64 entryVaddr, bool coprocessor1Enabled) -> bool {
+  auto& instructions = plan.instructions;
+  std::vector<bool> isSeen(instructions.size());
+  std::vector<size_t> pending;
+  auto follow = [&](u64 vaddr) {
+    if(vaddr < plan.startVaddr || vaddr >= plan.windowEndVaddr) return;
+    pending.push_back((vaddr - plan.startVaddr) / 4);
+  };
+  auto isInternal = [&](u64 vaddr) {
+    return std::find(plan.internalEntryVaddrs.begin(), plan.internalEntryVaddrs.end(), vaddr)
+      != plan.internalEntryVaddrs.end();
+  };
+  follow(entryVaddr);
+  while(!pending.empty()) {
+    size_t index = pending.back();
+    pending.pop_back();
+    if(isSeen[index]) continue;
+    isSeen[index] = true;
+    auto& planned = instructions[index];
+    if(!isPureInstruction(planned.instruction)) return false;
+    if(!planned.info.branch()) {
+      follow(planned.vaddr + 4);
+      continue;
+    }
+    size_t delaySlot = index + 1;
+    if(delaySlot < instructions.size() && !isPureInstruction(instructions[delaySlot].instruction)) {
+      return false;
+    }
+    auto [taken, fallthrough] =
+      computeBranchTargets(coprocessor1Enabled, planned.vaddr, planned.instruction);
+    if(isInternal(taken)) follow(taken);
+    if(isInternal(fallthrough)) follow(fallthrough);
+  }
   return true;
 }
 
@@ -851,6 +922,13 @@ auto CPU::Recompiler::emit(u64 vaddr, u32 address, u64 stateKey) -> Block* {
   block->startAddress = startAddress;
   block->endAddress = windowEndAddress;
   block->sectionDirty = sectionDirty.data() + startSection;
+  bool coprocessor1Enabled = emitStateKey.coprocessor1Enabled();
+  block->isPure = isPureFrom(plan, plan.startVaddr, coprocessor1Enabled);
+  emitAliasPurity.clear();
+  for(auto aliasAddress : emitAliasAddresses) {
+    u64 aliasVaddr = plan.startVaddr + (aliasAddress - plan.startAddress);
+    emitAliasPurity.push_back(isPureFrom(plan, aliasVaddr, coprocessor1Enabled));
+  }
 
   return block;
 }

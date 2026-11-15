@@ -59,6 +59,7 @@ auto CPU::DataCache::read(u64 vaddr, u32 paddr) -> u64 {
     }
     line.fill(paddr);
     self.profile.dcacheMisses++;
+    self.sideEffectCount++;
   } else {
     cpu.step(1 * 2);
     self.profile.dcacheHits++;
@@ -88,6 +89,7 @@ auto CPU::DataCache::write(u64 vaddr, u32 paddr, u64 data) -> void {
     }
     line.fill(paddr);
     self.profile.dcacheMisses++;
+    self.sideEffectCount++;
   } else {
     cpu.step(1 * 2);
     self.profile.dcacheHits++;

@@ -60,6 +60,9 @@ auto option(string name, string value) -> bool {
       rsp.recompiler.enabled = value.boolean();
     }
   }
+  if(name == "Skip Spin Loops") {
+    cpu.spinLoop.enabled = Accuracy::CPU::Recompiler && value.boolean();
+  }
   if(Model::Nintendo64() && name == "Expansion Pak") system.expansionPak = value.boolean();
   if(Model::Nintendo64() && name == "Controller Pak Banks") {
     if (value == "32KiB (Default)") {

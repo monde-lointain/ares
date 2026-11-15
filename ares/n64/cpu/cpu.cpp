@@ -159,11 +159,14 @@ auto CPU::instruction() -> bool {
         if(queueDelta < 0) queueDelta = 0;
         s64 capBudget = min<s64>(Accuracy::CPU::JitInterleaving, min(timerDelta, queueDelta));
         jitClockTarget = Thread::clock + capBudget;
+        spinLoop.reset();
       }
+      if(spinLoop.enabled) skipSpinRepeats(*block);
       block->execute(*this);
       return Thread::clock >= jitClockTarget;
     }
   }
+  spinLoop.reset();
 
   auto data = fetch(access);
   if (!data) return true;
@@ -173,6 +176,64 @@ auto CPU::instruction() -> bool {
   instructionEpilogue<0>();
   pipeline.end();
   return true;
+}
+
+//Called as each block is dispatched, between synchronizations. A dispatch
+//to an address below the last one's begins a loop. Until the next
+//synchronization, only the CPU changes memory, and the loop's repeats
+//change none, so a repeat that begins with the same registers does as
+//the last did. Data cache lines are direct-mapped, so the first repeat's
+//loads leave the lines as later ones find them; the second repeat thus
+//shows the clocks each later one takes. From the third, the clock skips
+//the whole repeats that end before the synchronization, which then comes
+//in the same repeat, at the same clock, as it would have. A loop with a
+//breakpoint at a block's start isn't skipped, as each repeat must stop.
+auto CPU::skipSpinRepeats(const Recompiler::Block& block) -> void {
+  auto& loop = spinLoop;
+  u64 pc = ipu.pc;
+  bool isPure = block.isPure && !GDB::server.hasBreakpointAt(pc & 0xffff'ffff);
+  if(loop.sideEffectCount != sideEffectCount) {
+    loop.sideEffectCount = sideEffectCount;
+    loop.isPure = false;
+  }
+  auto capture = [&] {
+    memory::copy(loop.registers, ipu.r, sizeof(ipu.r));
+    loop.registers[32] = ipu.lo;
+    loop.registers[33] = ipu.hi;
+    loop.pipeline[0] = pipeline.nextpc;
+    loop.pipeline[1] = (u64)pipeline.state << 32 | pipeline.nstate;
+    loop.startClock = Thread::clock;
+    loop.period = 0;
+    loop.isPure = isPure;
+  };
+  auto unchanged = [&] {
+    return !memory::compare(loop.registers, ipu.r, sizeof(ipu.r))
+        && loop.registers[32].u64 == ipu.lo.u64
+        && loop.registers[33].u64 == ipu.hi.u64
+        && loop.pipeline[0] == pipeline.nextpc
+        && loop.pipeline[1] == ((u64)pipeline.state << 32 | pipeline.nstate);
+  };
+
+  if(pc == loop.start) {
+    if(loop.isPure && unchanged()) {
+      s64 period = Thread::clock - loop.startClock;
+      if(period > 0 && period == loop.period) {
+        s64 room = jitClockTarget - 1 - Thread::clock;
+        if(room >= period) Thread::clock += room / period * period;
+      }
+      loop.period = period;
+      loop.startClock = Thread::clock;
+      loop.isPure = isPure;
+    } else {
+      capture();
+    }
+  } else if(pc < loop.previousPc) {
+    loop.start = pc;
+    capture();
+  } else {
+    loop.isPure = loop.isPure && isPure;
+  }
+  loop.previousPc = pc;
 }
 
 auto CPU::instructionPrologue(u64 address, u32 instruction) -> void {

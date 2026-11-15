@@ -1074,6 +1074,9 @@ struct CPU : Thread {
       u32 startAddress = 0;
       u32 endAddress = 0;
       u8* sectionDirty = nullptr;
+      //whether the block only computes in registers, branches and reads
+      //memory, so that running it again from the same registers repeats it
+      bool isPure = false;
     };
 
     struct Section {
@@ -1218,11 +1221,36 @@ struct CPU : Thread {
     Block* activeBlock = nullptr;
     bump_allocator allocator;
     std::vector<u32> emitAliasAddresses;
+    std::vector<bool> emitAliasPurity;  //Block::isPure of each alias
     std::vector<SlowPath> slowPaths;
     std::vector<Section*> sections;
     std::vector<u8> sectionDirty;
   } recompiler{*this};
   s64 jitClockTarget = 0;
+
+  //A loop that only computes and reads memory, such as one polling for
+  //another component's work, repeats exactly until the next
+  //synchronization, as only the CPU runs until then. Where its start finds
+  //the same registers thrice, with the same clocks between, the loop's
+  //remaining whole repeats before the synchronization are skipped by
+  //advancing the clock alone (see skipSpinRepeats in cpu.cpp).
+  struct SpinLoop {
+    bool enabled = false;
+    u64 start = ~0ull;         //the dispatch address that begins the loop
+    u64 previousPc = ~0ull;    //the dispatch address before this one
+    bool isPure = false;       //whether the repeat so far has been pure
+    u64 sideEffectCount = 0;   //CPU::sideEffectCount when last seen
+    s64 startClock = 0;        //the clock when the repeat began
+    s64 period = 0;            //the clocks the last repeat took, or 0
+    r64 registers[34];         //the GPRs, LO and HI when the loop began
+    u64 pipeline[2];           //the pipeline's next pc and states then
+
+    auto reset() -> void { start = ~0ull; previousPc = ~0ull; }
+  } spinLoop;
+  //uncached reads, data cache misses and exceptions: the events of a loop
+  //repeat that a later repeat might not repeat
+  u64 sideEffectCount = 0;
+  auto skipSpinRepeats(const Recompiler::Block& block) -> void;
 
   struct Disassembler {
     CPU& self;

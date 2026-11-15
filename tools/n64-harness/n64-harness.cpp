@@ -53,7 +53,7 @@
 // Addresses are hexadecimal virtual addresses (e.g. 80025c00). Errors are
 // reported as "error MESSAGE" so the driver can fail the test loudly.
 //
-// Usage: n64-harness [--sram FILE] [--homebrew] ROM
+// Usage: n64-harness [--sram FILE] [--homebrew] [--no-spin-skip] ROM
 //
 // --homebrew turns on ares's Homebrew Mode, whose checks report, among
 // others, a DMA reading memory still dirty in the CPU's data cache and one
@@ -61,6 +61,10 @@
 // messages, to stdout; the harness sends them to stderr and keeps stdout
 // for the replies alone. It also counts the reads that raced a CPU store
 // (see "races"), each of which can make the frame depend on timing.
+//
+// The harness skips the repeats of loops that only read memory and
+// compute, such as a game polling for a frame's end, which the machine
+// would only repeat; --no-spin-skip runs each of them, for comparison.
 
 #include <nall/nall.hpp>
 #include <nall/main.hpp>
@@ -102,7 +106,7 @@ struct Harness : ares::Platform {
 
   FILE* replies = stdout;
 
-  auto load(const string& romPath, const string& sramPath, bool homebrew) -> bool;
+  auto load(const string& romPath, const string& sramPath, bool homebrew, bool skipsSpins) -> bool;
   auto serve() -> void;
 
   auto attach(ares::Node::Object) -> void override {}
@@ -159,7 +163,7 @@ auto Harness::log(ares::Node::Debugger::Tracer::Tracer, string_view message) -> 
   traceMessages.push_back(message);
 }
 
-auto Harness::load(const string& romPath, const string& sramPath, bool homebrew) -> bool {
+auto Harness::load(const string& romPath, const string& sramPath, bool homebrew, bool skipsSpins) -> bool {
   system = mia::System::create("Nintendo 64");
   if(system->load() != successful) return print(stderr, "error: system load failed\n"), false;
   game = mia::Medium::create("Nintendo 64");
@@ -178,6 +182,7 @@ auto Harness::load(const string& romPath, const string& sramPath, bool homebrew)
   ares::Nintendo64::option("Recompiler", true);
   ares::Nintendo64::option("Synchronous RDP", true);
   ares::Nintendo64::option("Homebrew Mode", homebrew);
+  ares::Nintendo64::option("Skip Spin Loops", skipsSpins);
   nall::GDB::server.reset();
   if(!ares::Nintendo64::load(root, "[Nintendo] Nintendo 64 (NTSC)")) return false;
 
@@ -329,8 +334,9 @@ auto nall::main(Arguments arguments) -> void {
   string sramPath;
   arguments.take("--sram", sramPath);
   bool homebrew = arguments.take("--homebrew");
+  bool skipsSpins = !arguments.take("--no-spin-skip");
   if(arguments.size() != 1) {
-    print(stderr, "usage: n64-harness [--sram FILE] [--homebrew] ROM\n");
+    print(stderr, "usage: n64-harness [--sram FILE] [--homebrew] [--no-spin-skip] ROM\n");
     exit(EXIT_FAILURE);
   }
 
@@ -346,7 +352,7 @@ auto nall::main(Arguments arguments) -> void {
     print(stderr, "error: cannot separate the replies from stdout\n");
     exit(EXIT_FAILURE);
   }
-  if(!harness.load(arguments.take(), sramPath, homebrew)) exit(EXIT_FAILURE);
+  if(!harness.load(arguments.take(), sramPath, homebrew, skipsSpins)) exit(EXIT_FAILURE);
   harness.serve();
   harness.root->unload();
 }

@@ -170,6 +170,7 @@ auto CPU::read(PhysAccess access) -> maybe<u64> {
   u32 paddr = access.paddr;
   if(context.littleEndian()) paddr = reverseEndianPaddr<Size>(paddr);
   if(access.cache) return dcache.read<Size>(access.vaddr, paddr);
+  sideEffectCount++;
   return busRead<Size>(paddr);
 }
 
