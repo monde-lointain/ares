@@ -3,6 +3,9 @@ if(n64 IN_LIST ARES_CORES)
 
   target_include_directories(n64-harness PRIVATE ${CMAKE_SOURCE_DIR})
   target_link_libraries(n64-harness PRIVATE ares::ares ares::mia ares::nall)
+  # mia.hpp includes hiro.hpp, which includes the resource header that
+  # sourcery writes into hiro's sources; nothing else orders it first
+  add_dependencies(n64-harness hiro-resource)
 
   if(ARES_ENABLE_CHD)
     target_link_libraries(n64-harness PRIVATE chdr-static)
